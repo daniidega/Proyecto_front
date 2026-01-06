@@ -19,6 +19,8 @@ HTTP_TIMEOUT = 120
 UPLOAD_DIR = "uploads"  # respaldo local opcional
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+DEBUG_API = False  # <- ponlo True temporalmente si quieres ver status/response
+
 # --------------------------------------------------
 # LOGIN Y ROLES
 # --------------------------------------------------
@@ -53,6 +55,7 @@ if not st.session_state.login:
 if "cargas" not in st.session_state:
     # Cada carga: {id (str), fecha, estado, comentario}
     st.session_state.cargas = []
+
 if "documentos" not in st.session_state:
     # Por carga_id (str): lista de docs
     st.session_state.documentos = {}
@@ -83,12 +86,44 @@ def obtener_id_carga() -> str:
         raise Exception(f"Respuesta inválida: {data}")
     return data["id_carga"]
 
-def subir_pdf_a_api(file_bytes: bytes, filename: str) -> dict:
+def _normalizar_respuesta_upload(api_json: dict) -> dict:
+    """
+    Backend devuelve:
+      { "blob": {container, blob_name, url}, "mongo": {...} }
+
+    Front usa:
+      container, blob_name, blob_url
+    """
+    blob = (api_json or {}).get("blob") or {}
+    return {
+        "container": blob.get("container"),
+        "blob_name": blob.get("blob_name"),
+        "blob_url": blob.get("url"),
+        "mongo": (api_json or {}).get("mongo"),
+        "raw": api_json,
+    }
+
+def subir_pdf_a_api(file_bytes: bytes, filename: str, id_carga: str) -> dict:
+    if not id_carga:
+        raise Exception("id_carga vacío: no se puede enviar el PDF")
+
     files = {"file": (filename, file_bytes, "application/pdf")}
-    resp = requests.post(API_UPLOAD_URL, files=files, timeout=HTTP_TIMEOUT)
+    data = {"id_carga": id_carga}
+
+    if DEBUG_API:
+        st.write("DEBUG -> Enviando id_carga:", id_carga)
+        st.write("DEBUG -> filename:", filename)
+
+    resp = requests.post(API_UPLOAD_URL, files=files, data=data, timeout=HTTP_TIMEOUT)
+
+    if DEBUG_API:
+        st.write("DEBUG -> status_code:", resp.status_code)
+        st.write("DEBUG -> response_text:", resp.text)
+
     if resp.status_code not in (200, 201):
         raise Exception(f"HTTP {resp.status_code}: {resp.text}")
-    return resp.json()
+
+    return _normalizar_respuesta_upload(resp.json())
 
 def crear_carga(carga_id: str) -> str:
     st.session_state.cargas.insert(0, {
@@ -142,13 +177,14 @@ def reintentar_carga(carga_id: str):
             with open(ruta_local, "rb") as f:
                 file_bytes = f.read()
 
-            r = subir_pdf_a_api(file_bytes, d["nombre_enviado"])
+            # ✅ Se reenvía el MISMO id_carga (carga_id)
+            r = subir_pdf_a_api(file_bytes, d["nombre_enviado"], carga_id)
 
             d["estado"] = "OK"
             d["error"] = ""
-            d["container"] = r.get("container")
-            d["blob_name"] = r.get("blob_name")
-            d["blob_url"] = r.get("blob_url")
+            d["container"] = r.get("container") or ""
+            d["blob_name"] = r.get("blob_name") or ""
+            d["blob_url"] = r.get("blob_url") or ""
 
             ok += 1
 
@@ -220,7 +256,7 @@ elif menu == "Subir PDFs":
     with col2:
         guardar_respaldo = st.checkbox("Guardar respaldo local", value=True)
 
-    # ID automático, sin intervención del usuario
+    # ID automático
     if not st.session_state.id_carga_actual:
         try:
             st.session_state.id_carga_actual = obtener_id_carga()
@@ -237,7 +273,6 @@ elif menu == "Subir PDFs":
         key=f"uploader_{st.session_state.uploader_key}",
     )
 
-    # Botón explícito para iniciar carga (evita re-subidas en rerun)
     iniciar = st.button("Iniciar carga", disabled=not bool(archivos))
 
     if iniciar and archivos:
@@ -274,12 +309,13 @@ elif menu == "Subir PDFs":
                         f.write(file_bytes)
                     doc["ruta_local"] = ruta_local
 
-                r = subir_pdf_a_api(file_bytes, nombre_envio)
+                # ✅ Se envía id_carga (carga_id)
+                r = subir_pdf_a_api(file_bytes, nombre_envio, carga_id)
 
                 doc["estado"] = "OK"
-                doc["container"] = r.get("container")
-                doc["blob_name"] = r.get("blob_name")
-                doc["blob_url"] = r.get("blob_url")
+                doc["container"] = r.get("container") or ""
+                doc["blob_name"] = r.get("blob_name") or ""
+                doc["blob_url"] = r.get("blob_url") or ""
 
                 ok += 1
 
@@ -300,13 +336,12 @@ elif menu == "Subir PDFs":
             actualizar_carga(carga_id, "COMPLETADO", f"Carga completada correctamente. OK={ok}/{total}")
             st.success("Carga completada correctamente")
 
-        # Preparar nuevo ID para la próxima carga
+        # Nuevo ID para próxima carga
         try:
             st.session_state.id_carga_actual = obtener_id_carga()
         except Exception:
             st.session_state.id_carga_actual = ""
 
-        # Reset del uploader (evita que siga “pegado” el archivo seleccionado)
         st.session_state.uploader_key += 1
         st.rerun()
 
