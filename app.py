@@ -1,25 +1,27 @@
 import streamlit as st
-import sqlite3
-import pandas as pd
-import time
+import requests
 import os
-from datetime import datetime
 import uuid
+import time
+from datetime import datetime
 
 # --------------------------------------------------
-# CONFIGURACIÓN GENERAL
+# CONFIGURACIÓN
 # --------------------------------------------------
 st.set_page_config(page_title="Dashboard Cargas PDF", layout="wide")
 
-UPLOAD_DIR = "uploads"
+API_UPLOAD_URL = "https://proyectoback-h6ajcba8cpewd5bc.brazilsouth-01.azurewebsites.net/storage/pdf"
+HTTP_TIMEOUT = 120
+
+UPLOAD_DIR = "uploads"  # respaldo local opcional
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # --------------------------------------------------
-# LOGIN Y ROLES
+# LOGIN Y ROLES (igual a tu versión)
 # --------------------------------------------------
 USUARIOS = {
     "admin": {"password": "admin123", "rol": "admin"},
-    "usuario": {"password": "user123", "rol": "usuario"}
+    "usuario": {"password": "user123", "rol": "usuario"},
 }
 
 def login():
@@ -43,108 +45,120 @@ if not st.session_state.login:
     st.stop()
 
 # --------------------------------------------------
-# BASE DE DATOS
+# STATE EN MEMORIA (sin SQLite)
 # --------------------------------------------------
-def get_connection():
-    return sqlite3.connect("crud.db", check_same_thread=False)
-
-conn = get_connection()
-cursor = conn.cursor()
-
-# --------------------------------------------------
-# TABLAS
-# --------------------------------------------------
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS cargas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha TEXT,
-    estado TEXT,
-    comentario TEXT
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS documentos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre_archivo TEXT,
-    ruta TEXT,
-    tamaño_kb REAL,
-    fecha_carga TEXT,
-    id_carga INTEGER
-)
-""")
-conn.commit()
+if "cargas" not in st.session_state:
+    # Cada carga: {id, fecha, estado, comentario}
+    st.session_state.cargas = []
+if "documentos" not in st.session_state:
+    # Por carga_id: lista de docs {nombre_original, nombre_enviado, ruta_local, estado, error, blob_url, blob_name, container}
+    st.session_state.documentos = {}
+if "next_carga_id" not in st.session_state:
+    st.session_state.next_carga_id = 1
 
 # --------------------------------------------------
-# FUNCIONES DE BD
+# HELPERS
 # --------------------------------------------------
-def crear_carga():
-    cursor.execute("""
-        INSERT INTO cargas (fecha, estado, comentario)
-        VALUES (?, ?, ?)
-    """, (datetime.now(), "EN_PROCESO", "Carga iniciada"))
-    conn.commit()
-    return cursor.lastrowid
+def ahora_str() -> str:
+    return datetime.now().isoformat(sep=" ", timespec="microseconds")
 
-def actualizar_carga(id_carga, estado, comentario):
-    cursor.execute("""
-        UPDATE cargas SET estado=?, comentario=? WHERE id=?
-    """, (estado, comentario, id_carga))
-    conn.commit()
-
-def guardar_pdf(nombre, ruta, tamaño, id_carga):
-    cursor.execute("""
-        INSERT INTO documentos
-        (nombre_archivo, ruta, tamaño_kb, fecha_carga, id_carga)
-        VALUES (?, ?, ?, ?, ?)
-    """, (nombre, ruta, tamaño, datetime.now(), id_carga))
-    conn.commit()
-
-def obtener_cargas():
-    return pd.read_sql("SELECT * FROM cargas ORDER BY id DESC", conn)
-
-def obtener_documentos_por_carga(id_carga):
-    return pd.read_sql(
-        "SELECT * FROM documentos WHERE id_carga=?",
-        conn,
-        params=(id_carga,)
-    )
-
-def nombre_unico(nombre):
+def nombre_unico(nombre: str) -> str:
     base, ext = os.path.splitext(nombre)
     return f"{base}_{uuid.uuid4().hex}{ext}"
 
-# --------------------------------------------------
-# REINTENTAR CARGA
-# --------------------------------------------------
-def reintentar_carga(id_carga):
-    actualizar_carga(id_carga, "EN_PROCESO", "Reintentando carga")
+def subir_pdf_a_api(file_bytes: bytes, filename: str) -> dict:
+    files = {"file": (filename, file_bytes, "application/pdf")}
+    resp = requests.post(API_UPLOAD_URL, files=files, timeout=HTTP_TIMEOUT)
+    if resp.status_code not in (200, 201):
+        raise Exception(f"HTTP {resp.status_code}: {resp.text}")
+    try:
+        return resp.json()
+    except Exception:
+        raise Exception(f"Respuesta no es JSON: {resp.text}")
 
-    docs = obtener_documentos_por_carga(id_carga)
+def crear_carga() -> int:
+    carga_id = st.session_state.next_carga_id
+    st.session_state.next_carga_id += 1
+
+    st.session_state.cargas.insert(0, {
+        "id": carga_id,
+        "fecha": ahora_str(),
+        "estado": "EN_PROCESO",
+        "comentario": "Carga iniciada"
+    })
+    st.session_state.documentos[carga_id] = []
+    return carga_id
+
+def actualizar_carga(carga_id: int, estado: str, comentario: str):
+    for c in st.session_state.cargas:
+        if c["id"] == carga_id:
+            c["estado"] = estado
+            c["comentario"] = comentario
+            return
+
+def registrar_documento(carga_id: int, doc: dict):
+    st.session_state.documentos.setdefault(carga_id, []).append(doc)
+
+def documentos_de_carga(carga_id: int):
+    return st.session_state.documentos.get(carga_id, [])
+
+def reintentar_carga(carga_id: int):
+    docs = documentos_de_carga(carga_id)
+    if not docs:
+        actualizar_carga(carga_id, "ERROR", "No hay documentos asociados para reintentar")
+        st.error("No hay documentos para reintentar")
+        return
+
+    # Solo reintentar los que están en ERROR
+    fallidos = [d for d in docs if d.get("estado") == "ERROR"]
+    if not fallidos:
+        actualizar_carga(carga_id, "COMPLETADO", "No hay documentos en ERROR para reintentar")
+        st.info("No hay documentos en ERROR para reintentar")
+        return
+
+    actualizar_carga(carga_id, "EN_PROCESO", "Reintentando carga")
+
     progress = st.progress(0)
-    total = len(docs)
-
+    total = len(fallidos)
+    ok = 0
     errores = []
 
-    for i, row in docs.iterrows():
+    for i, d in enumerate(fallidos):
         try:
-            if not os.path.exists(row["ruta"]):
-                raise Exception("Archivo no existe")
+            ruta_local = d.get("ruta_local")
+            if not ruta_local or not os.path.exists(ruta_local):
+                raise Exception("No existe respaldo local para reintentar (habilita 'Guardar respaldo local')")
 
-            if os.path.getsize(row["ruta"]) == 0:
-                raise Exception("Archivo vacío")
+            if os.path.getsize(ruta_local) == 0:
+                raise Exception("Archivo local vacío")
 
-            time.sleep(0.1)
-            progress.progress(int(((i + 1) / total) * 100))
+            with open(ruta_local, "rb") as f:
+                file_bytes = f.read()
+
+            r = subir_pdf_a_api(file_bytes, d["nombre_enviado"])
+
+            d["estado"] = "OK"
+            d["error"] = ""
+            d["container"] = r.get("container")
+            d["blob_name"] = r.get("blob_name")
+            d["blob_url"] = r.get("blob_url")
+
+            ok += 1
 
         except Exception as e:
-            errores.append(f"{row['nombre_archivo']}: {str(e)}")
+            d["estado"] = "ERROR"
+            d["error"] = str(e)
+            errores.append(f"{d.get('nombre_original')}: {str(e)}")
+
+        progress.progress(int(((i + 1) / total) * 100))
+        time.sleep(0.03)
 
     if errores:
-        actualizar_carga(id_carga, "ERROR", " | ".join(errores))
-        st.error("Reintento fallido")
+        actualizar_carga(carga_id, "ERROR", f"Reintento con errores. OK={ok}/{total}")
+        st.error("Reintento finalizado con errores")
+        st.text("\n".join(errores))
     else:
-        actualizar_carga(id_carga, "COMPLETADO", "Reintento exitoso")
+        actualizar_carga(carga_id, "COMPLETADO", f"Reintento exitoso. OK={ok}/{total}")
         st.success("Reintento exitoso")
 
 # --------------------------------------------------
@@ -159,15 +173,15 @@ menu = st.sidebar.selectbox(
 )
 
 # --------------------------------------------------
-# DASHBOARD
+# DASHBOARD (mismo estilo/columnas)
 # --------------------------------------------------
 if menu == "Dashboard":
-    st.subheader("📈 Estado de las cargas")
+    st.subheader("📝 Estado de las cargas")
 
-    df = obtener_cargas()
+    cargas = st.session_state.cargas
 
-    if df.empty:
-        st.info("No hay cargas registradas")
+    if not cargas:
+        st.info("No hay cargas registradas en esta sesión.")
     else:
         header = st.columns([1, 3, 2, 6, 2])
         header[0].markdown("**ID**")
@@ -176,7 +190,7 @@ if menu == "Dashboard":
         header[3].markdown("**Comentario**")
         header[4].markdown("**Acción**")
 
-        for _, row in df.iterrows():
+        for row in cargas:
             cols = st.columns([1, 3, 2, 6, 2])
 
             cols[0].write(row["id"])
@@ -186,16 +200,33 @@ if menu == "Dashboard":
 
             if row["estado"] == "ERROR" and st.session_state.rol == "admin":
                 if cols[4].button("🔄 Reintentar", key=f"retry_{row['id']}"):
-                    reintentar_carga(row["id"])
+                    reintentar_carga(int(row["id"]))
                     st.rerun()
             else:
                 cols[4].write("—")
+
+    # Opcional: ver detalles de una carga (no cambia el dashboard principal)
+    st.divider()
+    st.subheader("📄 Detalle de documentos por carga")
+    carga_id = st.number_input("ID de carga", min_value=1, step=1)
+
+    if st.button("Ver documentos"):
+        docs = documentos_de_carga(int(carga_id))
+        if not docs:
+            st.info("No hay documentos para esa carga.")
+        else:
+            # tabla de detalle (no altera los campos del dashboard)
+            st.dataframe(docs, use_container_width=True)
 
 # --------------------------------------------------
 # SUBIR PDFs
 # --------------------------------------------------
 elif menu == "Subir PDFs":
     st.subheader("📤 Carga de PDFs")
+
+    col1, col2 = st.columns([2, 1])
+    with col2:
+        guardar_respaldo = st.checkbox("Guardar respaldo local", value=True)
 
     archivos = st.file_uploader(
         "Selecciona archivos PDF",
@@ -204,41 +235,71 @@ elif menu == "Subir PDFs":
     )
 
     if archivos:
-        id_carga = crear_carga()
+        carga_id = crear_carga()
+
         progress = st.progress(0)
+        total = len(archivos)
+        ok = 0
         errores = []
 
         for i, archivo in enumerate(archivos):
+            doc = {
+                "nombre_original": archivo.name,
+                "nombre_enviado": "",
+                "ruta_local": "",
+                "estado": "PENDIENTE",
+                "error": "",
+                "container": "",
+                "blob_name": "",
+                "blob_url": ""
+            }
+
             try:
                 if archivo.size == 0:
                     raise Exception("PDF vacío")
 
-                nombre = nombre_unico(archivo.name)
-                ruta = os.path.join(UPLOAD_DIR, nombre)
+                file_bytes = archivo.getbuffer().tobytes()
+                nombre_envio = nombre_unico(archivo.name)
+                doc["nombre_enviado"] = nombre_envio
 
-                with open(ruta, "wb") as f:
-                    f.write(archivo.getbuffer())
+                # respaldo local para reintentos
+                if guardar_respaldo:
+                    ruta_local = os.path.join(UPLOAD_DIR, nombre_envio)
+                    with open(ruta_local, "wb") as f:
+                        f.write(file_bytes)
+                    doc["ruta_local"] = ruta_local
 
-                guardar_pdf(
-                    nombre,
-                    ruta,
-                    round(archivo.size / 1024, 2),
-                    id_carge
-                )
+                # subir al backend
+                r = subir_pdf_a_api(file_bytes, nombre_envio)
 
-                progress.progress(int(((i + 1) / len(archivos)) * 100))
-                time.sleep(0.05)
+                doc["estado"] = "OK"
+                doc["container"] = r.get("container")
+                doc["blob_name"] = r.get("blob_name")
+                doc["blob_url"] = r.get("blob_url")
+
+                ok += 1
 
             except Exception as e:
+                doc["estado"] = "ERROR"
+                doc["error"] = str(e)
                 errores.append(f"{archivo.name}: {str(e)}")
 
+            registrar_documento(carga_id, doc)
+            progress.progress(int(((i + 1) / total) * 100))
+            time.sleep(0.03)
+
+        # estado final de la carga
         if errores:
-            actualizar_carga(id_carga, "ERROR", " | ".join(errores))
+            actualizar_carga(carga_id, "ERROR", f"Errores en carga. OK={ok}/{total}")
             st.error("Carga finalizada con errores")
             st.text("\n".join(errores))
         else:
-            actualizar_carga(id_carga, "COMPLETADO", "Carga completada correctamente")
+            actualizar_carga(carga_id, "COMPLETADO", f"Carga completada correctamente. OK={ok}/{total}")
             st.success("Carga completada correctamente")
+
+        st.divider()
+        st.subheader(f"Resultado de la carga #{carga_id}")
+        st.dataframe(documentos_de_carga(carga_id), use_container_width=True)
 
 # --------------------------------------------------
 # LOGOUT
