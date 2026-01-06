@@ -10,14 +10,17 @@ from datetime import datetime
 # --------------------------------------------------
 st.set_page_config(page_title="Dashboard Cargas PDF", layout="wide")
 
-API_UPLOAD_URL = "https://proyectoback-h6ajcba8cpewd5bc.brazilsouth-01.azurewebsites.net/storage/pdf"
+API_BASE = "https://proyectoback-h6ajcba8cpewd5bc.brazilsouth-01.azurewebsites.net"
+API_UPLOAD_URL = f"{API_BASE}/storage/pdf"
+API_ID_CARGA_URL = f"{API_BASE}/dashboard/id-carga"
+
 HTTP_TIMEOUT = 120
 
 UPLOAD_DIR = "uploads"  # respaldo local opcional
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # --------------------------------------------------
-# LOGIN Y ROLES (igual a tu versión)
+# LOGIN Y ROLES
 # --------------------------------------------------
 USUARIOS = {
     "admin": {"password": "admin123", "rol": "admin"},
@@ -48,13 +51,18 @@ if not st.session_state.login:
 # STATE EN MEMORIA (sin SQLite)
 # --------------------------------------------------
 if "cargas" not in st.session_state:
-    # Cada carga: {id, fecha, estado, comentario}
+    # Cada carga: {id (str), fecha, estado, comentario}
     st.session_state.cargas = []
 if "documentos" not in st.session_state:
-    # Por carga_id: lista de docs {nombre_original, nombre_enviado, ruta_local, estado, error, blob_url, blob_name, container}
+    # Por carga_id (str): lista de docs
     st.session_state.documentos = {}
-if "next_carga_id" not in st.session_state:
-    st.session_state.next_carga_id = 1
+
+if "id_carga_actual" not in st.session_state:
+    st.session_state.id_carga_actual = ""
+
+# clave dinámica para resetear el file_uploader y evitar re-subidas
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 1
 
 # --------------------------------------------------
 # HELPERS
@@ -66,50 +74,52 @@ def nombre_unico(nombre: str) -> str:
     base, ext = os.path.splitext(nombre)
     return f"{base}_{uuid.uuid4().hex}{ext}"
 
+def obtener_id_carga() -> str:
+    resp = requests.get(API_ID_CARGA_URL, timeout=HTTP_TIMEOUT)
+    if resp.status_code != 200:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text}")
+    data = resp.json()
+    if "id_carga" not in data or not data["id_carga"]:
+        raise Exception(f"Respuesta inválida: {data}")
+    return data["id_carga"]
+
 def subir_pdf_a_api(file_bytes: bytes, filename: str) -> dict:
     files = {"file": (filename, file_bytes, "application/pdf")}
     resp = requests.post(API_UPLOAD_URL, files=files, timeout=HTTP_TIMEOUT)
     if resp.status_code not in (200, 201):
         raise Exception(f"HTTP {resp.status_code}: {resp.text}")
-    try:
-        return resp.json()
-    except Exception:
-        raise Exception(f"Respuesta no es JSON: {resp.text}")
+    return resp.json()
 
-def crear_carga() -> int:
-    carga_id = st.session_state.next_carga_id
-    st.session_state.next_carga_id += 1
-
+def crear_carga(carga_id: str) -> str:
     st.session_state.cargas.insert(0, {
         "id": carga_id,
         "fecha": ahora_str(),
         "estado": "EN_PROCESO",
-        "comentario": "Carga iniciada"
+        "comentario": "Carga iniciada",
     })
     st.session_state.documentos[carga_id] = []
     return carga_id
 
-def actualizar_carga(carga_id: int, estado: str, comentario: str):
+def actualizar_carga(carga_id: str, estado: str, comentario: str):
     for c in st.session_state.cargas:
         if c["id"] == carga_id:
             c["estado"] = estado
             c["comentario"] = comentario
             return
 
-def registrar_documento(carga_id: int, doc: dict):
+def registrar_documento(carga_id: str, doc: dict):
     st.session_state.documentos.setdefault(carga_id, []).append(doc)
 
-def documentos_de_carga(carga_id: int):
+def documentos_de_carga(carga_id: str):
     return st.session_state.documentos.get(carga_id, [])
 
-def reintentar_carga(carga_id: int):
+def reintentar_carga(carga_id: str):
     docs = documentos_de_carga(carga_id)
     if not docs:
         actualizar_carga(carga_id, "ERROR", "No hay documentos asociados para reintentar")
         st.error("No hay documentos para reintentar")
         return
 
-    # Solo reintentar los que están en ERROR
     fallidos = [d for d in docs if d.get("estado") == "ERROR"]
     if not fallidos:
         actualizar_carga(carga_id, "COMPLETADO", "No hay documentos en ERROR para reintentar")
@@ -128,9 +138,6 @@ def reintentar_carga(carga_id: int):
             ruta_local = d.get("ruta_local")
             if not ruta_local or not os.path.exists(ruta_local):
                 raise Exception("No existe respaldo local para reintentar (habilita 'Guardar respaldo local')")
-
-            if os.path.getsize(ruta_local) == 0:
-                raise Exception("Archivo local vacío")
 
             with open(ruta_local, "rb") as f:
                 file_bytes = f.read()
@@ -169,30 +176,28 @@ st.sidebar.success(f"Rol: {st.session_state.rol}")
 
 menu = st.sidebar.selectbox(
     "Menú",
-    ["Dashboard", "Subir PDFs"] if st.session_state.rol == "admin" else ["Dashboard"]
+    ["Dashboard", "Subir PDFs"] if st.session_state.rol == "admin" else ["Dashboard"],
 )
 
 # --------------------------------------------------
-# DASHBOARD (mismo estilo/columnas)
+# DASHBOARD
 # --------------------------------------------------
 if menu == "Dashboard":
     st.subheader("📝 Estado de las cargas")
 
     cargas = st.session_state.cargas
-
     if not cargas:
         st.info("No hay cargas registradas en esta sesión.")
     else:
-        header = st.columns([1, 3, 2, 6, 2])
-        header[0].markdown("**ID**")
+        header = st.columns([2, 3, 2, 6, 2])
+        header[0].markdown("**ID Carga**")
         header[1].markdown("**Fecha**")
         header[2].markdown("**Estado**")
         header[3].markdown("**Comentario**")
         header[4].markdown("**Acción**")
 
         for row in cargas:
-            cols = st.columns([1, 3, 2, 6, 2])
-
+            cols = st.columns([2, 3, 2, 6, 2])
             cols[0].write(row["id"])
             cols[1].write(row["fecha"])
             cols[2].write(row["estado"])
@@ -200,23 +205,10 @@ if menu == "Dashboard":
 
             if row["estado"] == "ERROR" and st.session_state.rol == "admin":
                 if cols[4].button("🔄 Reintentar", key=f"retry_{row['id']}"):
-                    reintentar_carga(int(row["id"]))
+                    reintentar_carga(row["id"])
                     st.rerun()
             else:
                 cols[4].write("—")
-
-    # Opcional: ver detalles de una carga (no cambia el dashboard principal)
-    st.divider()
-    st.subheader("📄 Detalle de documentos por carga")
-    carga_id = st.number_input("ID de carga", min_value=1, step=1)
-
-    if st.button("Ver documentos"):
-        docs = documentos_de_carga(int(carga_id))
-        if not docs:
-            st.info("No hay documentos para esa carga.")
-        else:
-            # tabla de detalle (no altera los campos del dashboard)
-            st.dataframe(docs, use_container_width=True)
 
 # --------------------------------------------------
 # SUBIR PDFs
@@ -228,14 +220,28 @@ elif menu == "Subir PDFs":
     with col2:
         guardar_respaldo = st.checkbox("Guardar respaldo local", value=True)
 
+    # ID automático, sin intervención del usuario
+    if not st.session_state.id_carga_actual:
+        try:
+            st.session_state.id_carga_actual = obtener_id_carga()
+        except Exception as e:
+            st.error(f"No se pudo generar ID de carga: {e}")
+            st.stop()
+
+    st.info(f"ID Carga asignado: **{st.session_state.id_carga_actual}**")
+
     archivos = st.file_uploader(
         "Selecciona archivos PDF",
         type=["pdf"],
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        key=f"uploader_{st.session_state.uploader_key}",
     )
 
-    if archivos:
-        carga_id = crear_carga()
+    # Botón explícito para iniciar carga (evita re-subidas en rerun)
+    iniciar = st.button("Iniciar carga", disabled=not bool(archivos))
+
+    if iniciar and archivos:
+        carga_id = crear_carga(st.session_state.id_carga_actual)
 
         progress = st.progress(0)
         total = len(archivos)
@@ -251,7 +257,7 @@ elif menu == "Subir PDFs":
                 "error": "",
                 "container": "",
                 "blob_name": "",
-                "blob_url": ""
+                "blob_url": "",
             }
 
             try:
@@ -262,14 +268,12 @@ elif menu == "Subir PDFs":
                 nombre_envio = nombre_unico(archivo.name)
                 doc["nombre_enviado"] = nombre_envio
 
-                # respaldo local para reintentos
                 if guardar_respaldo:
                     ruta_local = os.path.join(UPLOAD_DIR, nombre_envio)
                     with open(ruta_local, "wb") as f:
                         f.write(file_bytes)
                     doc["ruta_local"] = ruta_local
 
-                # subir al backend
                 r = subir_pdf_a_api(file_bytes, nombre_envio)
 
                 doc["estado"] = "OK"
@@ -288,7 +292,6 @@ elif menu == "Subir PDFs":
             progress.progress(int(((i + 1) / total) * 100))
             time.sleep(0.03)
 
-        # estado final de la carga
         if errores:
             actualizar_carga(carga_id, "ERROR", f"Errores en carga. OK={ok}/{total}")
             st.error("Carga finalizada con errores")
@@ -297,9 +300,15 @@ elif menu == "Subir PDFs":
             actualizar_carga(carga_id, "COMPLETADO", f"Carga completada correctamente. OK={ok}/{total}")
             st.success("Carga completada correctamente")
 
-        st.divider()
-        st.subheader(f"Resultado de la carga #{carga_id}")
-        st.dataframe(documentos_de_carga(carga_id), use_container_width=True)
+        # Preparar nuevo ID para la próxima carga
+        try:
+            st.session_state.id_carga_actual = obtener_id_carga()
+        except Exception:
+            st.session_state.id_carga_actual = ""
+
+        # Reset del uploader (evita que siga “pegado” el archivo seleccionado)
+        st.session_state.uploader_key += 1
+        st.rerun()
 
 # --------------------------------------------------
 # LOGOUT
