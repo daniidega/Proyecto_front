@@ -226,6 +226,32 @@ def inject_css():
             text-decoration: none;
           }
 
+          /* ✅ ID CARGA CARD (AJUSTE) */
+          .idcard{
+            border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 16px;
+            background: rgba(255,255,255,0.06);
+            box-shadow: 0 14px 34px rgba(0,0,0,0.35);
+            padding: 14px 16px;
+            margin: 10px 0 16px 0;
+            max-width: 520px;
+          }
+          .idcard .label{
+            font-size: 13px;
+            font-weight: 900;
+            letter-spacing: .6px;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.65);
+            margin-bottom: 6px;
+          }
+          .idcard .value{
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 22px;
+            font-weight: 950;
+            color: rgba(255,255,255,0.95);
+            text-shadow: 0 0 10px rgba(0,120,212,0.35);
+          }
+
           /* FOOTER */
           .app-footer{
             margin-top: 48px;
@@ -275,7 +301,7 @@ if "rol" not in st.session_state:
 if "excel_ready" not in st.session_state:
     st.session_state.excel_ready = {}
 
-# ✅ NUEVO: controla si el menú está abierto/cerrado
+# ✅ controla si el menú está abierto/cerrado
 if "sidebar_open" not in st.session_state:
     st.session_state.sidebar_open = True
 
@@ -386,7 +412,7 @@ if not st.session_state.sidebar_open:
         st.markdown("")
 
 # --------------------------------------------------
-# SIDEBAR + MENU (controlado por sidebar_open)
+# SIDEBAR + MENU
 # --------------------------------------------------
 menu = "Dashboard"  # default si el menú está cerrado
 
@@ -394,7 +420,6 @@ if st.session_state.sidebar_open:
     st.sidebar.markdown(f"## {APP_NAME}")
     st.sidebar.caption(f"Rol: **{st.session_state.rol}**")
 
-    # ✅ Botón para cerrar el menú (sin hacerlo desaparecer)
     if st.sidebar.button("Cerrar menú", use_container_width=True):
         st.session_state.sidebar_open = False
         st.rerun()
@@ -410,7 +435,6 @@ if st.session_state.sidebar_open:
         st.session_state.clear()
         st.rerun()
 else:
-    # Sidebar "mínimo" para no romper layout (no desaparece)
     st.sidebar.markdown(f"## {APP_NAME}")
     st.sidebar.caption("Menú oculto")
     st.sidebar.divider()
@@ -579,6 +603,7 @@ elif menu == "Subir PDFs":
         st.error(f"No se pudo generar ID de carga: {e}")
         st.stop()
 
+    # ✅ Ahora sí queda con estilo (idcard definido en CSS)
     st.markdown(
         f"""
         <div class="idcard">
@@ -601,7 +626,7 @@ elif menu == "Subir PDFs":
 
     if iniciar and archivos:
         progress = st.progress(0)
-        total = len(archivos)
+        total_files = len(archivos)
         ok_count = 0
         errores = []
 
@@ -619,14 +644,14 @@ elif menu == "Subir PDFs":
             except Exception as e:
                 errores.append(f"{archivo.name}: {str(e)}")
 
-            progress.progress(int(((i + 1) / total) * 100))
+            progress.progress(int(((i + 1) / total_files) * 100))
             time.sleep(0.02)
 
         if errores:
-            st.error(f"Carga finalizada con errores. OK={ok_count}/{total}")
+            st.error(f"Carga finalizada con errores. OK={ok_count}/{total_files}")
             st.code("\n".join(errores), language=None)
         else:
-            st.success(f"Carga completada correctamente. OK={ok_count}/{total}")
+            st.success(f"Carga completada correctamente. OK={ok_count}/{total_files}")
 
 # --------------------------------------------------
 # FOOTER
