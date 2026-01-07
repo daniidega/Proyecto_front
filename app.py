@@ -11,7 +11,7 @@ from typing import Optional
 # --------------------------------------------------
 st.set_page_config(page_title="Dashboard Cargas PDF", layout="wide")
 
-API_BASE = "http://localhost:8000"
+API_BASE = "https://proyectoback-h6ajcba8cpewd5bc.brazilsouth-01.azurewebsites.net"
 API_UPLOAD_URL = f"{API_BASE}/storage/pdf"
 API_ID_CARGA_URL = f"{API_BASE}/dashboard/id-carga"
 API_DASHBOARD_CARGAS_URL = f"{API_BASE}/dashboard/cargas"
