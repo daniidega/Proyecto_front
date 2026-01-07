@@ -4,22 +4,27 @@ import os
 import uuid
 import time
 from datetime import datetime
+from typing import Optional
 
 # --------------------------------------------------
 # CONFIGURACIÓN
 # --------------------------------------------------
 st.set_page_config(page_title="Dashboard Cargas PDF", layout="wide")
 
-API_BASE = "https://proyectoback-h6ajcba8cpewd5bc.brazilsouth-01.azurewebsites.net"
+API_BASE = "http://localhost:8000"
 API_UPLOAD_URL = f"{API_BASE}/storage/pdf"
 API_ID_CARGA_URL = f"{API_BASE}/dashboard/id-carga"
+API_DASHBOARD_CARGAS_URL = f"{API_BASE}/dashboard/cargas"
+API_RETRY_URL = f"{API_BASE}/dashboard/cargas"   # se usa como base: /{id}/retry
+API_EXCEL_URL = f"{API_BASE}/dashboard/cargas"   # base: /{id}/excel
+
 
 HTTP_TIMEOUT = 120
 
 UPLOAD_DIR = "uploads"  # respaldo local opcional
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-DEBUG_API = False  # <- ponlo True temporalmente si quieres ver status/response
+DEBUG_API = False  # <- True para ver status/response
 
 # --------------------------------------------------
 # LOGIN Y ROLES
@@ -50,20 +55,17 @@ if not st.session_state.login:
     st.stop()
 
 # --------------------------------------------------
-# STATE EN MEMORIA (sin SQLite)
+# STATE EN MEMORIA (solo para la UI de carga/reintento)
 # --------------------------------------------------
 if "cargas" not in st.session_state:
-    # Cada carga: {id (str), fecha, estado, comentario}
     st.session_state.cargas = []
 
 if "documentos" not in st.session_state:
-    # Por carga_id (str): lista de docs
     st.session_state.documentos = {}
 
 if "id_carga_actual" not in st.session_state:
     st.session_state.id_carga_actual = ""
 
-# clave dinámica para resetear el file_uploader y evitar re-subidas
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 1
 
@@ -85,6 +87,12 @@ def obtener_id_carga() -> str:
     if "id_carga" not in data or not data["id_carga"]:
         raise Exception(f"Respuesta inválida: {data}")
     return data["id_carga"]
+
+def obtener_cargas_desde_backend():
+    resp = requests.get(API_DASHBOARD_CARGAS_URL, timeout=HTTP_TIMEOUT)
+    if resp.status_code != 200:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text}")
+    return resp.json()
 
 def _normalizar_respuesta_upload(api_json: dict) -> dict:
     """
@@ -177,7 +185,6 @@ def reintentar_carga(carga_id: str):
             with open(ruta_local, "rb") as f:
                 file_bytes = f.read()
 
-            # ✅ Se reenvía el MISMO id_carga (carga_id)
             r = subir_pdf_a_api(file_bytes, d["nombre_enviado"], carga_id)
 
             d["estado"] = "OK"
@@ -204,8 +211,43 @@ def reintentar_carga(carga_id: str):
         actualizar_carga(carga_id, "COMPLETADO", f"Reintento exitoso. OK={ok}/{total}")
         st.success("Reintento exitoso")
 
+def retry_carga_backend(id_carga: str):
+    url = f"{API_RETRY_URL}/{id_carga}/retry"
+    resp = requests.post(url, timeout=HTTP_TIMEOUT)
+    if resp.status_code != 200:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text}")
+    return resp.json()
+
+def descargar_excel_backend(id_carga: str) -> bytes:
+    url = f"{API_EXCEL_URL}/{id_carga}/excel"
+    resp = requests.get(url, timeout=HTTP_TIMEOUT)
+    if resp.status_code != 200:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text}")
+    return resp.content
+
 # --------------------------------------------------
-# UI
+# HOMOLOGACIÓN DE ESTADOS (Mongo -> UI)
+# --------------------------------------------------
+ESTADO_ES = {
+    "UPLOADED": "Cargado",
+    "PROCESSED": "Procesado",
+    "ERROR": "Error",
+}
+
+def traducir_estado(status: str) -> str:
+    if not status:
+        return "Desconocido"
+    return ESTADO_ES.get(status.upper(), status)
+
+def comentario_por_estado(status: str, error_message: Optional[str]) -> str:
+    st_norm = (status or "").upper()
+    if st_norm == "ERROR":
+        msg = (error_message or "").strip()
+        return msg if msg else "Error en el procesamiento"
+    return "Carga completada correctamente. OK"
+
+# --------------------------------------------------
+# UI (AQUÍ SE DEFINE menu)
 # --------------------------------------------------
 st.title("📊 Dashboard de Cargas PDF")
 st.sidebar.success(f"Rol: {st.session_state.rol}")
@@ -216,14 +258,19 @@ menu = st.sidebar.selectbox(
 )
 
 # --------------------------------------------------
-# DASHBOARD
+# DASHBOARD (desde Mongo vía backend)
 # --------------------------------------------------
 if menu == "Dashboard":
     st.subheader("📝 Estado de las cargas")
 
-    cargas = st.session_state.cargas
+    try:
+        cargas = obtener_cargas_desde_backend()
+    except Exception as e:
+        st.error(f"No se pudo consultar el dashboard: {e}")
+        st.stop()
+
     if not cargas:
-        st.info("No hay cargas registradas en esta sesión.")
+        st.info("No hay cargas registradas.")
     else:
         header = st.columns([2, 3, 2, 6, 2])
         header[0].markdown("**ID Carga**")
@@ -233,16 +280,46 @@ if menu == "Dashboard":
         header[4].markdown("**Acción**")
 
         for row in cargas:
-            cols = st.columns([2, 3, 2, 6, 2])
-            cols[0].write(row["id"])
-            cols[1].write(row["fecha"])
-            cols[2].write(row["estado"])
-            cols[3].write(row["comentario"])
+            id_carga = row.get("id_carga")
+            fecha = row.get("updated_at") or row.get("fecha")
+            status = row.get("status") or row.get("estado") or ""
+            error_message = row.get("error_message")
 
-            if row["estado"] == "ERROR" and st.session_state.rol == "admin":
-                if cols[4].button("🔄 Reintentar", key=f"retry_{row['id']}"):
-                    reintentar_carga(row["id"])
-                    st.rerun()
+            estado_es = traducir_estado(status)
+            comentario = comentario_por_estado(status, error_message)
+
+            cols = st.columns([2, 3, 2, 6, 2])
+            cols[0].write(id_carga)
+            cols[1].write(fecha)
+            cols[2].write(estado_es)
+            cols[3].write(comentario)
+
+            status_norm = (status or "").upper()
+
+            # ACCIÓN: ERROR -> Reintentar
+            if status_norm == "ERROR" and st.session_state.rol == "admin":
+                if cols[4].button("🔄 Reintentar", key=f"retry_{id_carga}"):
+                    try:
+                        retry_carga_backend(id_carga)
+                        st.success(f"Reintento enviado para {id_carga}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"No se pudo reintentar: {e}")
+
+            # ACCIÓN: PROCESSED -> Descargar Excel
+            elif status_norm == "PROCESSED":
+                if cols[4].button("⬇️ Descargar Excel", key=f"excel_{id_carga}"):
+                    try:
+                        excel_bytes = descargar_excel_backend(id_carga)
+                        st.download_button(
+                            label="Descargar archivo",
+                            data=excel_bytes,
+                            file_name=f"{id_carga}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"download_{id_carga}",
+                        )
+                    except Exception as e:
+                        st.error(f"No se pudo descargar Excel: {e}")
             else:
                 cols[4].write("—")
 
@@ -256,7 +333,6 @@ elif menu == "Subir PDFs":
     with col2:
         guardar_respaldo = st.checkbox("Guardar respaldo local", value=True)
 
-    # ID automático
     if not st.session_state.id_carga_actual:
         try:
             st.session_state.id_carga_actual = obtener_id_carga()
@@ -309,7 +385,6 @@ elif menu == "Subir PDFs":
                         f.write(file_bytes)
                     doc["ruta_local"] = ruta_local
 
-                # ✅ Se envía id_carga (carga_id)
                 r = subir_pdf_a_api(file_bytes, nombre_envio, carga_id)
 
                 doc["estado"] = "OK"
@@ -336,7 +411,6 @@ elif menu == "Subir PDFs":
             actualizar_carga(carga_id, "COMPLETADO", f"Carga completada correctamente. OK={ok}/{total}")
             st.success("Carga completada correctamente")
 
-        # Nuevo ID para próxima carga
         try:
             st.session_state.id_carga_actual = obtener_id_carga()
         except Exception:
