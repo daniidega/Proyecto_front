@@ -18,8 +18,8 @@ API_ID_CARGA_URL = f"{API_BASE}/dashboard/id-carga"
 API_DASHBOARD_CARGAS_URL = f"{API_BASE}/dashboard/cargas"
 API_RETRY_URL = f"{API_BASE}/dashboard/cargas"
 
-# ✅ ENDPOINT REAL (según tu curl)
-API_EXCEL_ENDPOINT = f"{API_BASE}/dashboard/extractions/excel"
+# ✅ Endpoint del Excel global (ajústalo si tu backend es diferente)
+API_EXCEL_GLOBAL_URL = f"{API_BASE}/dashboard/extractions/excel"
 
 HTTP_TIMEOUT = 120
 UPLOAD_DIR = "uploads"
@@ -156,6 +156,9 @@ def inject_css():
             text-transform: uppercase;
             color: rgba(255,255,255,0.75);
           }
+          .grid-row { border-bottom: 1px solid rgba(255,255,255,0.06); }
+          .grid-row:nth-child(even) { background: rgba(255,255,255,0.02); }
+          .grid-row:hover { background: rgba(0,120,212,0.12); }
 
           .grid-cell {
             overflow: hidden;
@@ -166,6 +169,7 @@ def inject_css():
             font-weight: 750 !important;
           }
 
+          /* ID CARGA (TABLA) – BLANCO FORZADO */
           .grid-mono, .grid-mono *{
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
             color: #ffffff !important;
@@ -207,53 +211,9 @@ def inject_css():
           }
           .owl-panel img { max-height: 120px; width: auto; opacity: 0.95; }
 
-          /* Botón descarga directo */
-          .btn-download {
-            display: inline-block;
-            width: 100%;
-            text-align: center;
-            padding: 0.6rem 0.9rem;
-            border-radius: 0.6rem;
-            border: 1px solid rgba(255,255,255,0.18);
-            background: rgba(255,255,255,0.06);
-            color: inherit;
-            text-decoration: none;
-            font-weight: 600;
-            margin-top: 10px;
-          }
-          .btn-download:hover {
-            border-color: rgba(255,255,255,0.28);
-            background: rgba(255,255,255,0.10);
-            text-decoration: none;
-          }
-
-          /* ✅ ID CARGA CARD (AJUSTE) */
-          .idcard{
-            border: 1px solid rgba(255,255,255,0.10);
-            border-radius: 16px;
-            background: rgba(255,255,255,0.06);
-            box-shadow: 0 14px 34px rgba(0,0,0,0.35);
-            padding: 14px 16px;
-            margin: 10px 0 16px 0;
-            max-width: 520px;
-          }
-          .idcard .label{
-            font-size: 13px;
-            font-weight: 900;
-            letter-spacing: .6px;
-            text-transform: uppercase;
-            color: rgba(255,255,255,0.65);
-            margin-bottom: 6px;
-          }
-          .idcard .value{
-            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            font-size: 22px;
-            font-weight: 950;
-            color: rgba(255,255,255,0.95);
-            text-shadow: 0 0 10px rgba(0,120,212,0.35);
-          }
-
-          /* FOOTER */
+          /* =========================
+             FOOTER – HECHO CON AMOR
+             ========================= */
           .app-footer{
             margin-top: 48px;
             padding: 18px 0 8px 0;
@@ -271,6 +231,62 @@ def inject_css():
             color: #ff4d6d;
             margin: 0 4px;
           }
+
+          /* =========================================================
+             SIDEBAR FIJO – NO COLAPSABLE + QUITAR BOTONES (<<)
+             ========================================================= */
+          section[data-testid="stSidebar"] {
+            width: 10rem !important;
+            min-width: 10rem !important;
+            max-width: 10rem !important;
+            transform: none !important;
+            visibility: visible !important;
+          }
+
+          section[data-testid="stSidebar"][aria-hidden="true"] {
+            transform: none !important;
+          }
+
+          button[aria-label="Collapse sidebar"],
+          button[aria-label="Expand sidebar"],
+          button[aria-label="Close sidebar"],
+          button[aria-label="Open sidebar"] {
+            display: none !important;
+          }
+
+          /* ==========================================
+             BOTÓN DESCARGA EXCEL (LINK ESTILADO)
+             ========================================== */
+          .btn-download {
+            display: inline-block;
+            width: 100%;
+            text-align: center;
+            padding: 0.6rem 0.9rem;
+            border-radius: 0.6rem;
+            border: 1px solid rgba(255,255,255,0.18);
+            background: rgba(255,255,255,0.06);
+            color: inherit;
+            text-decoration: none;
+            font-weight: 800;
+            font-size: 16px;
+          }
+          .btn-download:hover {
+            border-color: rgba(255,255,255,0.28);
+            background: rgba(255,255,255,0.10);
+            text-decoration: none;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def hide_sidebar():
+    st.markdown(
+        """
+        <style>
+          section[data-testid="stSidebar"] { display: none !important; }
+          div[data-testid="stSidebarNav"] { display: none !important; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -301,9 +317,17 @@ def img_to_base64(path: str) -> str:
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
 
+
 def render_download_excel_button(download_url: str) -> None:
+    """
+    Un SOLO botón que dispara descarga directa (sin segundo botón).
+    Se implementa como <a> estilado como botón.
+    """
     st.markdown(
         f"""
+        <!-- ✅ ESPACIO para que NO queden pegados (imagen vs botón) -->
+        <div style="height: 12px;"></div>
+
         <a class="btn-download" href="{download_url}" target="_self" rel="noopener">
           ⬇️ Descargar Excel (Extracciones)
         </a>
@@ -311,21 +335,8 @@ def render_download_excel_button(download_url: str) -> None:
         unsafe_allow_html=True,
     )
 
+
 inject_css()
-
-# --------------------------------------------------
-# SESSION STATE
-# --------------------------------------------------
-if "login" not in st.session_state:
-    st.session_state.login = False
-if "rol" not in st.session_state:
-    st.session_state.rol = "usuario"
-if "excel_ready" not in st.session_state:
-    st.session_state.excel_ready = {}
-
-# ✅ controla si el menú está abierto/cerrado
-if "sidebar_open" not in st.session_state:
-    st.session_state.sidebar_open = True
 
 # --------------------------------------------------
 # LOGIN
@@ -335,7 +346,15 @@ USUARIOS = {
     "usuario": {"password": "user123", "rol": "usuario"},
 }
 
+if "login" not in st.session_state:
+    st.session_state.login = False
+
+if "rol" not in st.session_state:
+    st.session_state.rol = "usuario"
+
+
 def login():
+    hide_sidebar()
     st.markdown('<div class="login-wrap"><div class="card">', unsafe_allow_html=True)
 
     logo_b64 = img_to_base64(LOGO_PATH) if os.path.exists(LOGO_PATH) else ""
@@ -362,7 +381,6 @@ def login():
         if usuario in USUARIOS and USUARIOS[usuario]["password"] == password:
             st.session_state.login = True
             st.session_state.rol = USUARIOS[usuario]["rol"]
-            st.session_state.sidebar_open = True
             st.rerun()
         else:
             st.error("Credenciales incorrectas")
@@ -403,6 +421,7 @@ def retry_carga_backend(id_carga: str):
         raise Exception(f"HTTP {resp.status_code}: {resp.text}")
     return resp.json()
 
+
 def nombre_unico(nombre: str) -> str:
     base, ext = os.path.splitext(nombre)
     return f"{base}_{uuid.uuid4().hex}{ext}"
@@ -428,46 +447,18 @@ def comentario_por_estado(status: str, error_message: Optional[str]) -> str:
         return "Procesamiento finalizado."
     return "Estado actualizado."
 
-# --------------------------------------------------
-# BOTÓN "ABRIR MENÚ" (cuando está cerrado)
-# --------------------------------------------------
-if not st.session_state.sidebar_open:
-    topbar_l, topbar_r = st.columns([1, 6], vertical_alignment="center")
-    with topbar_l:
-        if st.button("☰ Abrir menú", use_container_width=True):
-            st.session_state.sidebar_open = True
-            st.rerun()
-    with topbar_r:
-        st.markdown("")
 
 # --------------------------------------------------
 # SIDEBAR + MENU
 # --------------------------------------------------
-menu = "Dashboard"  # default si el menú está cerrado
+st.sidebar.markdown(f"## {APP_NAME}")
+st.sidebar.caption(f"Rol: **{st.session_state.rol}**")
 
-if st.session_state.sidebar_open:
-    st.sidebar.markdown(f"## {APP_NAME}")
-    st.sidebar.caption(f"Rol: **{st.session_state.rol}**")
-
-    if st.sidebar.button("Cerrar menú", use_container_width=True):
-        st.session_state.sidebar_open = False
-        st.rerun()
-
-    menu = st.sidebar.selectbox(
-        "Menú",
-        ["Dashboard", "Subir PDFs"] if st.session_state.rol == "admin" else ["Dashboard"],
-        index=0,
-    )
-
-    st.sidebar.divider()
-    if st.sidebar.button("Cerrar sesión", use_container_width=True):
-        st.session_state.clear()
-        st.rerun()
-else:
-    st.sidebar.markdown(f"## {APP_NAME}")
-    st.sidebar.caption("Menú oculto")
-    st.sidebar.divider()
-    st.sidebar.caption("Usa “☰ Abrir menú” en la parte superior.")
+menu = st.sidebar.selectbox(
+    "Menú",
+    ["Dashboard", "Subir PDFs"] if st.session_state.rol == "admin" else ["Dashboard"],
+    index=0,
+)
 
 # --------------------------------------------------
 # DASHBOARD
@@ -502,7 +493,8 @@ if menu == "Dashboard":
         else:
             st.markdown('<div class="owl-panel" style="font-size:64px;">🦉</div>', unsafe_allow_html=True)
 
-        render_download_excel_button(API_EXCEL_ENDPOINT)
+        # ✅ Botón debajo del búho (descarga directa) + espacio (ya incluido en render_download_excel_button)
+        render_download_excel_button(API_EXCEL_GLOBAL_URL)
 
     try:
         cargas = obtener_cargas_desde_backend()
@@ -622,7 +614,7 @@ if menu == "Dashboard":
     st.markdown("</div>", unsafe_allow_html=True)
 
 # --------------------------------------------------
-# SUBIR PDFs
+# SUBIR PDFs (COMPACTO)
 # --------------------------------------------------
 elif menu == "Subir PDFs":
     st.markdown("## Subir PDFs")
@@ -633,7 +625,6 @@ elif menu == "Subir PDFs":
         st.error(f"No se pudo generar ID de carga: {e}")
         st.stop()
 
-    # ✅ Ahora sí queda con estilo (idcard definido en CSS)
     st.markdown(
         f"""
         <div class="idcard">
@@ -656,7 +647,7 @@ elif menu == "Subir PDFs":
 
     if iniciar and archivos:
         progress = st.progress(0)
-        total_files = len(archivos)
+        total = len(archivos)
         ok_count = 0
         errores = []
 
@@ -674,17 +665,25 @@ elif menu == "Subir PDFs":
             except Exception as e:
                 errores.append(f"{archivo.name}: {str(e)}")
 
-            progress.progress(int(((i + 1) / total_files) * 100))
+            progress.progress(int(((i + 1) / total) * 100))
             time.sleep(0.02)
 
         if errores:
-            st.error(f"Carga finalizada con errores. OK={ok_count}/{total_files}")
+            st.error(f"Carga finalizada con errores. OK={ok_count}/{total}")
             st.code("\n".join(errores), language=None)
         else:
-            st.success(f"Carga completada correctamente. OK={ok_count}/{total_files}")
+            st.success(f"Carga completada correctamente. OK={ok_count}/{total}")
 
 # --------------------------------------------------
-# FOOTER
+# LOGOUT
+# --------------------------------------------------
+st.sidebar.divider()
+if st.sidebar.button("Cerrar sesión", key="logout_btn"):
+    st.session_state.clear()
+    st.rerun()
+
+# --------------------------------------------------
+# FOOTER (SOLO AL FINAL)
 # --------------------------------------------------
 st.markdown(
     """
