@@ -17,7 +17,9 @@ API_UPLOAD_URL = f"{API_BASE}/storage/pdf"
 API_ID_CARGA_URL = f"{API_BASE}/dashboard/id-carga"
 API_DASHBOARD_CARGAS_URL = f"{API_BASE}/dashboard/cargas"
 API_RETRY_URL = f"{API_BASE}/dashboard/cargas"
-API_EXCEL_URL = f"{API_BASE}/dashboard/cargas"
+
+# ✅ Endpoint del Excel global (ajústalo si tu backend es diferente)
+API_EXCEL_GLOBAL_URL = f"{API_BASE}/dashboard/extractions/excel"
 
 HTTP_TIMEOUT = 120
 UPLOAD_DIR = "uploads"
@@ -27,6 +29,7 @@ st.set_page_config(
     page_title=APP_NAME,
     layout="wide",
     page_icon="🦉",
+    initial_sidebar_state="expanded",
 )
 
 # --------------------------------------------------
@@ -208,152 +211,8 @@ def inject_css():
           }
           .owl-panel img { max-height: 120px; width: auto; opacity: 0.95; }
 
-          /* LOGIN INPUTS (NO BLANCOS) – Streamlit 1.52.2 */
-          div[data-testid="stTextInput"] label,
-          div[data-testid="stPassword"] label{
-            color: rgba(255,255,255,0.92) !important;
-            font-weight: 750 !important;
-            font-size: 16px !important;
-          }
-          div[data-testid="stTextInput"] div[data-baseweb="base-input"],
-          div[data-testid="stPassword"]  div[data-baseweb="base-input"],
-          div[data-testid="stTextInput"] div[data-baseweb="input"] > div,
-          div[data-testid="stPassword"]  div[data-baseweb="input"] > div,
-          div[data-testid="stTextInput"] div[data-baseweb="input"],
-          div[data-testid="stPassword"]  div[data-baseweb="input"]{
-            background-color: rgba(255,255,255,0.10) !important;
-            border: 1px solid rgba(255,255,255,0.22) !important;
-            border-radius: 12px !important;
-          }
-          div[data-testid="stTextInput"] input,
-          div[data-testid="stPassword"]  input{
-            background-color: rgba(255,255,255,0.10) !important;
-            color: #ffffff !important;
-            -webkit-text-fill-color: #ffffff !important;
-            caret-color: #ffffff !important;
-            font-size: 18px !important;
-            padding: 14px 16px !important;
-          }
-          div[data-testid="stTextInput"] input:-webkit-autofill,
-          div[data-testid="stTextInput"] input:-webkit-autofill:hover,
-          div[data-testid="stTextInput"] input:-webkit-autofill:focus,
-          div[data-testid="stPassword"] input:-webkit-autofill,
-          div[data-testid="stPassword"] input:-webkit-autofill:hover,
-          div[data-testid="stPassword"] input:-webkit-autofill:focus{
-            -webkit-text-fill-color: #ffffff !important;
-            transition: background-color 5000s ease-in-out 0s !important;
-            box-shadow: 0 0 0px 1000px rgba(255,255,255,0.10) inset !important;
-            border-radius: 12px !important;
-          }
-
-          /* SUBIR PDFs – panel ID (reemplaza st.info) */
-          .idcard{
-            border: 1px solid rgba(255,255,255,0.12);
-            border-radius: 14px;
-            background: rgba(255,255,255,0.06);
-            padding: 14px 16px;
-            margin: 10px 0 14px 0;
-            display:flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-          }
-          .idcard .label{
-            color: rgba(0, 127, 255);
-            font-weight: 800;
-            font-size: 16px;
-            text-transform: uppercase;
-            letter-spacing: .6px;
-          }
-          .idcard .value{
-            color: #007FFF !important;
-            -webkit-text-fill-color: #007FFF !important;
-            font-weight: 950;
-            font-size: 18px;
-            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            text-shadow: 0 0 10px rgba(0,120,212,0.45);
-          }
-
-          /* FILE UPLOADER – texto claro (agresivo) */
-          div[data-testid="stFileUploader"] * {
-            color: rgba(255,255,255,0.92) !important;
-            -webkit-text-fill-color: rgba(255,255,255,0.92) !important;
-            opacity: 1 !important;
-          }
-
-          /* =========================================================
-             FILE UPLOADER – QUITAR FONDO BLANCO (Streamlit 1.52.2)
-             (CORREGIDO: SIN <style> ANIDADO)
-             ========================================================= */
-          div[data-testid="stFileUploaderDropzone"]{
-            background: rgba(255,255,255,0.06) !important;
-            border: 1px solid rgba(255,255,255,0.18) !important;
-            border-radius: 14px !important;
-          }
-
-          div[data-testid="stFileUploader"] section{
-            background: rgba(255,255,255,0.06) !important;
-            border: 1px solid rgba(255,255,255,0.18) !important;
-            border-radius: 14px !important;
-          }
-
-          div[data-testid="stFileUploader"] [data-baseweb="file-uploader"]{
-            background: transparent !important;
-          }
-          div[data-testid="stFileUploader"] [data-baseweb="file-uploader"] > div{
-            background: rgba(255,255,255,0.06) !important;
-          }
-
-          div[data-testid="stFileUploader"] button{
-            background: rgba(255,255,255,0.08) !important;
-            border: 1px solid rgba(255,255,255,0.20) !important;
-            color: rgba(255,255,255,0.92) !important;
-          }
-
-          div[data-testid="stFileUploaderDropzone"]:hover{
-            border-color: rgba(0,120,212,0.55) !important;
-            background: rgba(0,120,212,0.10) !important;
-          }
-
-          /* =========================================================
-             SIDEBAR SELECTBOX – NO EDITABLE + CURSOR FIX (Streamlit 1.52.2)
-             ========================================================= */
-          section[data-testid="stSidebar"] div[data-baseweb="select"] input {
-            pointer-events: none !important;
-            caret-color: transparent !important;
-          }
-          section[data-testid="stSidebar"] div[data-baseweb="select"] [role="combobox"]{
-            pointer-events: auto !important;
-          }
-
-          section[data-testid="stSidebar"] div[data-baseweb="select"],
-          section[data-testid="stSidebar"] div[data-baseweb="select"] * {
-            cursor: default !important;
-          }
-
-          section[data-testid="stSidebar"] div[data-baseweb="select"] input,
-          section[data-testid="stSidebar"] div[data-baseweb="select"] input[type="text"],
-          section[data-testid="stSidebar"] div[data-baseweb="select"] [contenteditable="true"] {
-            cursor: default !important;
-            caret-color: transparent !important;
-            user-select: none !important;
-            pointer-events: none !important;
-          }
-
-          section[data-testid="stSidebar"] div[data-baseweb="select"] div[role="combobox"] {
-            pointer-events: auto !important;
-            cursor: default !important;
-          }
-
-          section[data-testid="stSidebar"] div[data-baseweb="select"] div[role="combobox"]:focus,
-          section[data-testid="stSidebar"] div[data-baseweb="select"] div[role="combobox"]:focus-within {
-            outline: none !important;
-            box-shadow: none !important;
-          }
-
           /* =========================
              FOOTER – HECHO CON AMOR
-             (NO FIJO: se ve solo al final con scroll)
              ========================= */
           .app-footer{
             margin-top: 48px;
@@ -373,10 +232,54 @@ def inject_css():
             margin: 0 4px;
           }
 
+          /* =========================================================
+             SIDEBAR FIJO – NO COLAPSABLE + QUITAR BOTONES (<<)
+             ========================================================= */
+          section[data-testid="stSidebar"] {
+            width: 10rem !important;
+            min-width: 10rem !important;
+            max-width: 10rem !important;
+            transform: none !important;
+            visibility: visible !important;
+          }
+
+          section[data-testid="stSidebar"][aria-hidden="true"] {
+            transform: none !important;
+          }
+
+          button[aria-label="Collapse sidebar"],
+          button[aria-label="Expand sidebar"],
+          button[aria-label="Close sidebar"],
+          button[aria-label="Open sidebar"] {
+            display: none !important;
+          }
+
+          /* ==========================================
+             BOTÓN DESCARGA EXCEL (LINK ESTILADO)
+             ========================================== */
+          .btn-download {
+            display: inline-block;
+            width: 100%;
+            text-align: center;
+            padding: 0.6rem 0.9rem;
+            border-radius: 0.6rem;
+            border: 1px solid rgba(255,255,255,0.18);
+            background: rgba(255,255,255,0.06);
+            color: inherit;
+            text-decoration: none;
+            font-weight: 800;
+            font-size: 16px;
+          }
+          .btn-download:hover {
+            border-color: rgba(255,255,255,0.28);
+            background: rgba(255,255,255,0.10);
+            text-decoration: none;
+          }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
 
 def hide_sidebar():
     st.markdown(
@@ -389,9 +292,49 @@ def hide_sidebar():
         unsafe_allow_html=True,
     )
 
+
+def show_sidebar():
+    st.markdown(
+        """
+        <style>
+          section[data-testid="stSidebar"] {
+            display: block !important;
+            visibility: visible !important;
+            width: auto !important;
+            min-width: 18rem !important;
+          }
+          div[data-testid="stSidebarNav"] {
+            display: block !important;
+            visibility: visible !important;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def img_to_base64(path: str) -> str:
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
+
+
+def render_download_excel_button(download_url: str) -> None:
+    """
+    Un SOLO botón que dispara descarga directa (sin segundo botón).
+    Se implementa como <a> estilado como botón.
+    """
+    st.markdown(
+        f"""
+        <!-- ✅ ESPACIO para que NO queden pegados (imagen vs botón) -->
+        <div style="height: 12px;"></div>
+
+        <a class="btn-download" href="{download_url}" target="_self" rel="noopener">
+          ⬇️ Descargar Excel (Extracciones)
+        </a>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 inject_css()
 
@@ -409,8 +352,6 @@ if "login" not in st.session_state:
 if "rol" not in st.session_state:
     st.session_state.rol = "usuario"
 
-if "excel_ready" not in st.session_state:
-    st.session_state.excel_ready = {}
 
 def login():
     hide_sidebar()
@@ -446,9 +387,12 @@ def login():
 
     st.markdown("</div></div>", unsafe_allow_html=True)
 
+
 if not st.session_state.login:
     login()
     st.stop()
+
+show_sidebar()
 
 # --------------------------------------------------
 # API HELPERS
@@ -462,11 +406,13 @@ def obtener_id_carga() -> str:
         raise Exception(f"Respuesta inválida: {data}")
     return data["id_carga"]
 
+
 def obtener_cargas_desde_backend():
     resp = requests.get(API_DASHBOARD_CARGAS_URL, timeout=HTTP_TIMEOUT)
     if resp.status_code != 200:
         raise Exception(f"HTTP {resp.status_code}: {resp.text}")
     return resp.json()
+
 
 def retry_carga_backend(id_carga: str):
     url = f"{API_RETRY_URL}/{id_carga}/retry"
@@ -475,16 +421,11 @@ def retry_carga_backend(id_carga: str):
         raise Exception(f"HTTP {resp.status_code}: {resp.text}")
     return resp.json()
 
-def descargar_excel_backend(id_carga: str) -> bytes:
-    url = f"{API_EXCEL_URL}/{id_carga}/excel"
-    resp = requests.get(url, timeout=HTTP_TIMEOUT)
-    if resp.status_code != 200:
-        raise Exception(f"HTTP {resp.status_code}: {resp.text}")
-    return resp.content
 
 def nombre_unico(nombre: str) -> str:
     base, ext = os.path.splitext(nombre)
     return f"{base}_{uuid.uuid4().hex}{ext}"
+
 
 def subir_pdf_a_api(file_bytes: bytes, filename: str, id_carga: str):
     files = {"file": (filename, file_bytes, "application/pdf")}
@@ -494,6 +435,7 @@ def subir_pdf_a_api(file_bytes: bytes, filename: str, id_carga: str):
         raise Exception(f"HTTP {resp.status_code}: {resp.text}")
     return resp.json()
 
+
 def comentario_por_estado(status: str, error_message: Optional[str]) -> str:
     st_norm = (status or "").upper()
     if st_norm == "ERROR":
@@ -502,8 +444,9 @@ def comentario_por_estado(status: str, error_message: Optional[str]) -> str:
     if st_norm == "UPLOADED":
         return "Archivo cargado. En espera de procesamiento."
     if st_norm == "PROCESSED":
-        return "Procesamiento finalizado. Excel disponible."
+        return "Procesamiento finalizado."
     return "Estado actualizado."
+
 
 # --------------------------------------------------
 # SIDEBAR + MENU
@@ -536,6 +479,7 @@ if menu == "Dashboard":
             st.rerun()
 
     with top_right:
+        # ✅ Imagen del búho + botón debajo (un solo botón, descarga directa)
         if os.path.exists(LOGO_PATH):
             logo_b64 = img_to_base64(LOGO_PATH)
             st.markdown(
@@ -548,6 +492,9 @@ if menu == "Dashboard":
             )
         else:
             st.markdown('<div class="owl-panel" style="font-size:64px;">🦉</div>', unsafe_allow_html=True)
+
+        # ✅ Botón debajo del búho (descarga directa) + espacio (ya incluido en render_download_excel_button)
+        render_download_excel_button(API_EXCEL_GLOBAL_URL)
 
     try:
         cargas = obtener_cargas_desde_backend()
@@ -656,24 +603,6 @@ if menu == "Dashboard":
                         st.rerun()
                     except Exception as e:
                         st.error(f"No se pudo reintentar: {e}")
-
-            elif status_norm == "PROCESSED":
-                if id_carga in st.session_state.excel_ready:
-                    st.download_button(
-                        label="Descargar Excel",
-                        data=st.session_state.excel_ready[id_carga],
-                        file_name=f"{id_carga}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"download_{id_carga}",
-                        use_container_width=True,
-                    )
-                else:
-                    if st.button("Excel", key=f"excel_{id_carga}", use_container_width=True):
-                        try:
-                            st.session_state.excel_ready[id_carga] = descargar_excel_backend(id_carga)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"No se pudo preparar Excel: {e}")
             else:
                 st.caption("—")
 
@@ -689,8 +618,6 @@ if menu == "Dashboard":
 # --------------------------------------------------
 elif menu == "Subir PDFs":
     st.markdown("## Subir PDFs")
-
-    h1c, h2c = st.columns([3, 1], vertical_alignment="center")
 
     try:
         id_carga = obtener_id_carga()
@@ -751,12 +678,12 @@ elif menu == "Subir PDFs":
 # LOGOUT
 # --------------------------------------------------
 st.sidebar.divider()
-if st.sidebar.button("Cerrar sesión"):
+if st.sidebar.button("Cerrar sesión", key="logout_btn"):
     st.session_state.clear()
     st.rerun()
 
 # --------------------------------------------------
-# FOOTER (SOLO AL FINAL: se ve al hacer scroll)
+# FOOTER (SOLO AL FINAL)
 # --------------------------------------------------
 st.markdown(
     """
